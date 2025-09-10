@@ -8,13 +8,13 @@ import string
 import pymysqlpool #pymysql-pool
 from valr_python import Client
 
-from models import User, InsertUser, Trade, InsertTrade, MarketData, InsertMarketData, Session, Wallet, BankAccount, NewWallet
+from models import User, InsertUser, Trade, InsertTrade, MarketData, InsertMarketData, Session, Wallet, BankAccount, NewWallet, NewBankAccount
 
-from config import  DB_USER, DB_PASSWORD, DB_NAME, VALR_KEY, VALR_SECRET
+from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, VALR_KEY, VALR_SECRET
 
 class DataBase(object):
     def __init__(self, database):
-        config={'host':'127.0.0.1', 'user':DB_USER, 'password':DB_PASSWORD, 'database':database, 'autocommit':True}
+        config={'host':DB_HOST, 'user':DB_USER, 'password':DB_PASSWORD, 'database':database, 'autocommit':True}
         self.pool0 = pymysqlpool.ConnectionPool(size=2, maxsize=7, pre_create_num=2, name='pool0', **config)
         
     def query(self, sqlquery):
@@ -325,6 +325,38 @@ class MemStorage(IStorage):
         db = DataBase(DB_NAME)
         lastrowid = db.execute(sql, return_id=True)
 
+    def create_bank_account(self, new_bank_account: NewBankAccount, user: User) -> dict:
+        """Create a new bank account for user"""
+        # Check if user already has a bank account
+        check_sql = "SELECT id FROM bank_accounts WHERE email='%s'" % user.email
+        db = DataBase(DB_NAME)
+        existing = db.query(check_sql)
+        if existing:
+            raise ValueError("User already has a bank account")
+        
+        # Insert new bank account
+        sql = "INSERT INTO bank_accounts (email, account_name, account_number, branch_code) VALUES ('%s','%s','%s','%s')" % (
+            user.email, new_bank_account.accountName, new_bank_account.accountNumber, new_bank_account.branchCode
+        )
+        success, account_id = db.execute(sql, return_id=True)
+        
+        if success:
+            # Fetch the created account
+            fetch_sql = "SELECT id, email, account_name, account_number, branch_code, created, updated FROM bank_accounts WHERE id=%s" % account_id
+            account_data = db.query(fetch_sql)
+            if account_data:
+                account_row = account_data[0]
+                return {
+                    "id": str(account_row[0]),
+                    "email": account_row[1],
+                    "account_name": account_row[2],
+                    "account_number": account_row[3],
+                    "branch_code": account_row[4],
+                    "created": account_row[5].isoformat() if account_row[5] else None,
+                    "updated": account_row[6].isoformat() if account_row[6] else None
+                }
+        
+        raise Exception("Failed to create bank account")
 
     def create_trade(self, insert_trade: InsertTrade) -> Trade:
         trade = Trade(
