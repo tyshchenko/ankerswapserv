@@ -335,6 +335,31 @@ class PostgresStorage:
                     "updated": account_row[6].isoformat() if account_row[6] else None
                 }
 
+    def get_bank_accounts(self, user: User) -> List[dict]:
+        """Get all bank accounts for user"""
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, email, account_name, account_number, branch_code, created, updated
+                    FROM bank_accounts 
+                    WHERE email = %s
+                """, (user.email,))
+                accounts = cur.fetchall()
+                
+                result = []
+                for account_row in accounts:
+                    result.append({
+                        "id": str(account_row[0]),
+                        "email": account_row[1],
+                        "account_name": account_row[2],
+                        "account_number": account_row[3],
+                        "branch_code": account_row[4],
+                        "created": account_row[5].isoformat() if account_row[5] else None,
+                        "updated": account_row[6].isoformat() if account_row[6] else None
+                    })
+                
+                return result
+
     # Session management (in-memory for now)
     def create_session(self, user_id: str, session_token: str, expires_at: datetime) -> Session:
         session = Session(
