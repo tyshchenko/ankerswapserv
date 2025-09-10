@@ -284,6 +284,29 @@ class PostgresStorage:
                 
                 return wallets
 
+    def create_wallet(self, new_wallet: NewWallet, user: User) -> dict:
+        """Create a new wallet for user"""
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO wallets (email, coin, address, balance)
+                    VALUES (%s, %s, %s, 0)
+                    RETURNING id, email, coin, address, balance, is_active, created, updated
+                """, (user.email, new_wallet.coin, new_wallet.address))
+                wallet_row = cur.fetchone()
+                conn.commit()
+                
+                return {
+                    "id": str(wallet_row[0]),
+                    "email": wallet_row[1],
+                    "coin": wallet_row[2],
+                    "address": wallet_row[3],
+                    "balance": str(wallet_row[4]),
+                    "is_active": wallet_row[5],
+                    "created": wallet_row[6].isoformat() if wallet_row[6] else None,
+                    "updated": wallet_row[7].isoformat() if wallet_row[7] else None
+                }
+
     # Session management (in-memory for now)
     def create_session(self, user_id: str, session_token: str, expires_at: datetime) -> Session:
         session = Session(
