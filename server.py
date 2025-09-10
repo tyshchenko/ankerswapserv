@@ -62,6 +62,7 @@ class Application(tornado.web.Application):
             (r"/api/trades/(.+)", UserTradesHandler),
             (r"/api/wallets", WalletsHandler),
             (r"/api/wallet/create", WalletCreateHandler),
+            (r"/api/bankaccounts", BankAccountsHandler),
             (r"/api/bankaccount/create", BankAccountCreateHandler),
             
             # Authentication routes
@@ -446,6 +447,30 @@ class WalletCreateHandler(BaseHandler):
                 "success": True,
                 "wallet": wallet,
                 "message": "Wallet created successfully"
+            })
+            
+        except Exception as e:
+            print(e)
+            self.set_status(500)
+            self.write({"error": str(e)})
+
+
+class BankAccountsHandler(BaseHandler):
+    def get(self):
+        """Get all bank accounts for the authenticated user"""
+        try:
+            user = self.get_current_user_from_session()
+            if not user:
+                self.set_status(401)
+                self.write({"error": "Authentication required"})
+                return
+            
+            # Get user's bank accounts
+            bank_accounts = storage.get_bank_accounts(user)
+            
+            self.write({
+                "success": True,
+                "bank_accounts": bank_accounts
             })
             
         except Exception as e:
