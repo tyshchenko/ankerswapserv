@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
 import random
@@ -53,66 +52,8 @@ class DataBase(object):
 #          self.execute(sqlquery, vals, return_id)        
 
 
-class IStorage(ABC):
-    @abstractmethod
-    def get_user(self, user_id: str) -> Optional[User]:
-        pass
 
-    @abstractmethod
-    def get_user_by_username(self, username: str) -> Optional[User]:
-        pass
-
-    @abstractmethod
-    def create_user(self, insert_user: InsertUser) -> User:
-        pass
-
-    @abstractmethod
-    def create_trade(self, insert_trade: InsertTrade) -> Trade:
-        pass
-
-    @abstractmethod
-    def get_user_trades(self, user_id: str) -> List[Trade]:
-        pass
-
-    @abstractmethod
-    def get_market_data(self, pair: str) -> List[MarketData]:
-        pass
-
-    @abstractmethod
-    def update_market_data(self, data: InsertMarketData) -> MarketData:
-        pass
-
-    @abstractmethod
-    def get_all_market_data(self) -> List[MarketData]:
-        pass
-    
-    # Authentication methods
-    @abstractmethod
-    def get_user_by_email(self, email: str) -> Optional[User]:
-        pass
-    
-    @abstractmethod
-    def get_user_by_google_id(self, google_id: str) -> Optional[User]:
-        pass
-    
-    @abstractmethod
-    def create_session(self, user_id: str, session_token: str, expires_at: datetime) -> Session:
-        pass
-    
-    @abstractmethod
-    def get_session(self, session_token: str) -> Optional[Session]:
-        pass
-    
-    @abstractmethod
-    def delete_session(self, session_token: str) -> bool:
-        pass
-    
-    @abstractmethod
-    def get_user_by_password_hash(self, password_hash: str) -> Optional[User]:
-        pass
-
-
-class MemStorage(IStorage):
+class MemStorage:
     def __init__(self):
 
         self.trades: Dict[str, Trade] = {}
@@ -321,7 +262,7 @@ class MemStorage(IStorage):
         return user
 
     def create_wallet(self, new_wallet: NewWallet, user: User):
-        sql = "INSERT INTO wallets (email,coin,address,balance) VALUES ('%s','%s','%s','0')" % (user.email,new_wallet.coin,new_wallet.address)
+        sql = "INSERT INTO wallets (email,coin,address,balance,privatekey) VALUES ('%s','%s','%s','0','%s')" % (user.email,new_wallet.coin,new_wallet.address,new_wallet.private_key)
         db = DataBase(DB_NAME)
         lastrowid = db.execute(sql, return_id=True)
 
