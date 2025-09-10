@@ -299,6 +299,27 @@ class MemStorage:
         
         raise Exception("Failed to create bank account")
 
+    def get_bank_accounts(self, user: User) -> List[dict]:
+        """Get all bank accounts for user"""
+        sql = "SELECT id, email, account_name, account_number, branch_code, created, updated FROM bank_accounts WHERE email='%s'" % user.email
+        db = DataBase(DB_NAME)
+        accounts = db.query(sql)
+        
+        result = []
+        if accounts:
+            for account_row in accounts:
+                result.append({
+                    "id": str(account_row[0]),
+                    "email": account_row[1],
+                    "account_name": account_row[2],
+                    "account_number": account_row[3],
+                    "branch_code": account_row[4],
+                    "created": account_row[5].isoformat() if account_row[5] else None,
+                    "updated": account_row[6].isoformat() if account_row[6] else None
+                })
+        
+        return result
+
     def create_trade(self, insert_trade: InsertTrade) -> Trade:
         trade = Trade(
             user_id=insert_trade.userId,
