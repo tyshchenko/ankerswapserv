@@ -66,6 +66,7 @@ class Wallet(BaseModel):
 class NewWallet(BaseModel):
     coin: str
     address: Optional[str] = None
+    private_key: Optional[str] = None
 
     
 class BankAccount(BaseModel):
