@@ -503,7 +503,7 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
 def main():
     tornado.options.parse_command_line()
     app = Application()
-    app.listen(5875, address='127.0.0.1')
+    app.listen(5000, address='0.0.0.0')
     #logging.getLogger('tornado.access').disabled = True
     tornado.ioloop.IOLoop.current().start()
 

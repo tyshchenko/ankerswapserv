@@ -5,7 +5,7 @@ import uuid
 
 
 class User(BaseModel):
-    id: str = None
+    id: Optional[str] = None
     email: Optional[str] = None
     username: Optional[str] = None
     reference: Optional[str] = None

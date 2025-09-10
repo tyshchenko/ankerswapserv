@@ -135,8 +135,8 @@ class MemStorage(IStorage):
             base_price = prices.get(pair.replace('/',''), float("1"))
             data = []
             url = "https://min-api.cryptocompare.com/data/v2/histohour?fsym=%s&tsym=%s&limit=72&e=CCCAGG" % (pair.split('/')[0],pair.split('/')[1])
-            resutl = requests.get(url, headers={"Content-Type": "application/json"})
-            data72 = resutl.json()
+            result = requests.get(url, headers={"Content-Type": "application/json"})
+            data72 = result.json()
 
             # Generate 72 hours of hourly data
             for step in data72['Data']['Data']:
@@ -153,7 +153,7 @@ class MemStorage(IStorage):
 
     def randomstr(self, str_len):
         """---Get random string---"""
-        return "".join(random.choice(string.digits + string.ascii_upercase) for _ in range(str_len))
+        return "".join(random.choice(string.digits + string.ascii_uppercase) for _ in range(str_len))
 
     def create_reference(self, user_id):
         return 'APB' + str(user_id) + self.randomstr(6)
