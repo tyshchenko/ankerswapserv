@@ -77,6 +77,14 @@ class BankAccount(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.now)
 
 
+class NewBankAccount(BaseModel):
+    accountName: str = Field(..., alias="account_name")
+    accountNumber: str = Field(..., alias="account_number")
+    branchCode: str = Field(..., alias="branch_code")
+
+    model_config = {"populate_by_name": True}
+
+
 class Session(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str

@@ -9,7 +9,7 @@ import string
 import uuid
 
 from valr_python import Client
-from models import User, InsertUser, Trade, InsertTrade, MarketData, InsertMarketData, Session, Wallet, BankAccount, NewWallet
+from models import User, InsertUser, Trade, InsertTrade, MarketData, InsertMarketData, Session, Wallet, BankAccount, NewWallet, NewBankAccount
 from config import VALR_KEY, VALR_SECRET
 
 
@@ -305,6 +305,34 @@ class PostgresStorage:
                     "is_active": wallet_row[5],
                     "created": wallet_row[6].isoformat() if wallet_row[6] else None,
                     "updated": wallet_row[7].isoformat() if wallet_row[7] else None
+                }
+
+    def create_bank_account(self, new_bank_account: NewBankAccount, user: User) -> dict:
+        """Create a new bank account for user"""
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Check if user already has a bank account
+                cur.execute("SELECT id FROM bank_accounts WHERE email = %s", (user.email,))
+                existing = cur.fetchone()
+                if existing:
+                    raise ValueError("User already has a bank account")
+                
+                cur.execute("""
+                    INSERT INTO bank_accounts (email, account_name, account_number, branch_code)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id, email, account_name, account_number, branch_code, created, updated
+                """, (user.email, new_bank_account.accountName, new_bank_account.accountNumber, new_bank_account.branchCode))
+                account_row = cur.fetchone()
+                conn.commit()
+                
+                return {
+                    "id": str(account_row[0]),
+                    "email": account_row[1],
+                    "account_name": account_row[2],
+                    "account_number": account_row[3],
+                    "branch_code": account_row[4],
+                    "created": account_row[5].isoformat() if account_row[5] else None,
+                    "updated": account_row[6].isoformat() if account_row[6] else None
                 }
 
     # Session management (in-memory for now)

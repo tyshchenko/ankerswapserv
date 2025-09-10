@@ -23,7 +23,7 @@ import telebot
 from tornado.options import define, options
 
 from auth_utils import auth_utils
-from models import InsertTrade, InsertMarketData, LoginRequest, RegisterRequest, User, InsertUser, NewWallet
+from models import InsertTrade, InsertMarketData, LoginRequest, RegisterRequest, User, InsertUser, NewWallet, NewBankAccount
 
 from postgres_storage import storage
 from config import GOOGLE_CLIENT_ID
@@ -54,6 +54,7 @@ class Application(tornado.web.Application):
             (r"/api/trades/(.+)", UserTradesHandler),
             (r"/api/wallets", WalletsHandler),
             (r"/api/wallet/create", WalletCreateHandler),
+            (r"/api/bankaccount/create", BankAccountCreateHandler),
             
             # Authentication routes
             (r"/api/auth/register", RegisterHandler),
@@ -438,6 +439,45 @@ class WalletCreateHandler(BaseHandler):
                 "wallet": wallet,
                 "message": "Wallet created successfully"
             })
+            
+        except Exception as e:
+            print(e)
+            self.set_status(500)
+            self.write({"error": str(e)})
+
+
+class BankAccountCreateHandler(BaseHandler):
+    def post(self):
+        """Create a new bank account for the authenticated user"""
+        try:
+            body = json.loads(self.request.body.decode())
+            user = self.get_current_user_from_session()
+            if not user:
+                self.set_status(401)
+                self.write({"error": "Authentication required"})
+                return
+            
+            # Validate input data
+            try:
+                new_bank_account_data = NewBankAccount(**body)
+            except ValidationError as e:
+                self.set_status(400)
+                self.write({"error": "Invalid bank account data", "details": e.errors()})
+                return
+            
+            # Create the new bank account
+            try:
+                bank_account = storage.create_bank_account(new_bank_account_data, user)
+                
+                self.write({
+                    "success": True,
+                    "bank_account": bank_account,
+                    "message": "Bank account created successfully"
+                })
+            except ValueError as e:
+                self.set_status(400)
+                self.write({"error": str(e)})
+                return
             
         except Exception as e:
             print(e)
