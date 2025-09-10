@@ -25,8 +25,16 @@ from tornado.options import define, options
 from auth_utils import auth_utils
 from models import InsertTrade, InsertMarketData, LoginRequest, RegisterRequest, User, InsertUser, NewWallet, NewBankAccount
 
-from postgres_storage import storage
-from config import GOOGLE_CLIENT_ID
+from config import GOOGLE_CLIENT_ID, DATABASE_TYPE
+
+# Import storage based on configuration
+if DATABASE_TYPE.lower() == 'mysql':
+    from storage import storage
+elif DATABASE_TYPE.lower() == 'postgresql':
+    from postgres_storage import storage
+else:
+    # Default to PostgreSQL
+    from postgres_storage import storage
 
 class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):

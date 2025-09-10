@@ -321,7 +321,7 @@ class MemStorage(IStorage):
         return user
 
     def create_wallet(self, new_wallet: NewWallet, user: User):
-        sql = "INSERT INTO wallets (email,coin,address,balance,privatekey) VALUE ('%s','%s','%s','0','%s')" % (user.email,new_wallet.coin,new_wallet.address,new_wallet.private_key)
+        sql = "INSERT INTO wallets (email,coin,address,balance) VALUES ('%s','%s','%s','0')" % (user.email,new_wallet.coin,new_wallet.address)
         db = DataBase(DB_NAME)
         lastrowid = db.execute(sql, return_id=True)
 
