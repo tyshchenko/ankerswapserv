@@ -87,7 +87,7 @@ class MemStorage:
                     price=str(step['open']),
                     change_24h="0.00",
                     volume_24h=str(step['volumeto']),
-                    timestamp=datetime.fromtimestamp(int(step['time'])/1000)
+                    timestamp=datetime.fromtimestamp(int(step['time']))
                 ))
             
             self.market_data[pair] = data

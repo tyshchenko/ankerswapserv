@@ -14,13 +14,12 @@ class User(BaseModel):
     language: Optional[str] = 'English'
     timezone: Optional[str] = 'Africa/Johannesburg'
     verification_level: Optional[str] = 'basic'
-    phone: Optional[str] = None
     password_hash: Optional[str] = None
     google_id: Optional[str] = None
     first_name: Optional[str] = None
-    second_names: Optional[str] = None
     last_name: Optional[str] = None
     profile_image_url: Optional[str] = None
+    full_name: Optional[str] = None
     is_active: bool = True
     two_factor_enabled: bool = False
     email_notifications: bool = False
@@ -40,6 +39,12 @@ class InsertUser(BaseModel):
     google_id: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    country: Optional[str] = None
+    language: Optional[str] = None
+    timezone: Optional[str] = None
+    verification_level: Optional[str] = None
     profile_image_url: Optional[str] = None
 
 
