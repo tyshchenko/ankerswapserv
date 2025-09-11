@@ -30,82 +30,12 @@ from auth_utils import auth_utils
 from models import InsertTrade, InsertMarketData, LoginRequest, RegisterRequest, User, InsertUser, NewWallet, NewBankAccount
 from blockchain import generate_wallet, start_monitoring_wallet
 
-# Safe config import with fallback
-try:
-    from config import GOOGLE_CLIENT_ID, DATABASE_TYPE
-except ImportError:
-    from config import GOOGLE_CLIENT_ID
-    DATABASE_TYPE = 'mem'
+from config import GOOGLE_CLIENT_ID, DATABASE_TYPE, APP_PORT, APP_HOST
 
-# Safe storage selection with fallbacks
-storage = None
-database_type = os.getenv('DATABASE_TYPE', DATABASE_TYPE).lower()
-
-if database_type == 'postgresql':
-    try:
-        from postgres_storage import storage as _s
-        storage = _s
-        print("Using PostgreSQL storage")
-    except Exception as e:
-        print(f'PostgreSQL unavailable: {e}')
-elif database_type == 'mysql':
-    try:
-        from storage import storage as _s
-        storage = _s
-        print("Using MySQL storage")
-    except Exception as e:
-        print(f'MySQL unavailable: {e}')
-
-# Fallback to in-memory storage if others fail
-if storage is None:
-    print("Using fallback in-memory storage")
-    # Create minimal in-memory storage
-    from models import MarketData
-    import uuid
-    
-    class FallbackStorage:
-        def __init__(self):
-            self.sessions = {}
-            self.latest_prices = [
-                MarketData(pair="BTC/ZAR", price="1000000", change_24h="2.5", volume_24h="1000000", timestamp=datetime.now()),
-                MarketData(pair="ETH/ZAR", price="50000", change_24h="1.8", volume_24h="500000", timestamp=datetime.now()),
-                MarketData(pair="USDT/ZAR", price="18.50", change_24h="0.1", volume_24h="100000", timestamp=datetime.now())
-            ]
-        
-        def get_market_data(self, pair: str, timeframe: str = "1H"):
-            return [data for data in self.latest_prices if data.pair == pair]
-        
-        def get_all_market_data(self, timeframe: str = "1H"):
-            return self.latest_prices
-        
-        def create_session(self, user_id, session_token, expires_at):
-            from models import Session
-            session = Session(user_id=user_id, session_token=session_token, expires_at=expires_at)
-            self.sessions[session_token] = session
-            return session
-        
-        def get_session(self, session_token):
-            session = self.sessions.get(session_token)
-            if session and session.expires_at > datetime.now():
-                return session
-            elif session:
-                del self.sessions[session_token]
-            return None
-        
-        def delete_session(self, session_token):
-            if session_token in self.sessions:
-                del self.sessions[session_token]
-                return True
-            return False
-        
-        def get_user(self, user_id): return None
-        def create_user(self, user): return None
-        def get_wallets(self, user): return []
-        def create_wallet(self, wallet, user, generated_wallet=None): return {}
-        def get_bank_accounts(self, user): return []
-        def create_bank_account(self, account, user): return {}
-    
-    storage = FallbackStorage()
+if DATABASE_TYPE == 'postgresql':
+    from postgres_storage import storage
+elif DATABASE_TYPE == 'mysql':
+    from storage import storage
 
 class DateTimeEncoder(json.JSONEncoder):
     def default(self, o):
@@ -153,10 +83,6 @@ class Application(tornado.web.Application):
             "debug": True
         }
         super(Application, self).__init__(handlers, **settings)
-    
-    def get_auth_headers(self):
-        """Get authentication headers"""
-        return {}
 
     def wathcher(self):
         try:
@@ -257,7 +183,6 @@ class RegisterHandler(BaseHandler):
             # Create session
             session_token = auth_utils.generate_session_token()
             expires_at = datetime.now() + timedelta(days=7)
-            session_data = {"session_token": session_token, "expires_at": expires_at.isoformat()}
             storage.create_session(user.id, session_token, expires_at)
 
             # Set secure cookie
@@ -305,7 +230,6 @@ class LoginHandler(BaseHandler):
             # Create session
             session_token = auth_utils.generate_session_token()
             expires_at = datetime.now() + timedelta(days=7)
-            session_data = {"session_token": session_token, "expires_at": expires_at.isoformat()}
             storage.create_session(user.id, session_token, expires_at)
             
             # Set secure cookie
@@ -404,7 +328,6 @@ class GoogleAuthHandler(BaseHandler):
             # Create session
             session_token = auth_utils.generate_session_token()
             expires_at = datetime.now() + timedelta(days=7)
-            session_data = {"session_token": session_token, "expires_at": expires_at.isoformat()}
             storage.create_session(user.id, session_token, expires_at)
             
             # Set secure cookie
@@ -502,7 +425,7 @@ class WalletCreateHandler(BaseHandler):
                 self.write({"error": "Authentication required"})
                 return
             
-            # Validate input data (only coin is required)
+            # Validate input data
             try:
                 new_wallet_data = NewWallet(**body)
             except ValidationError as e:
@@ -518,43 +441,14 @@ class WalletCreateHandler(BaseHandler):
                     self.write({"error": f"Wallet for {new_wallet_data.coin} already exists"})
                     return
             
-            # Generate wallet using blockchain functionality
-            try:
-                generated_wallet = generate_wallet(new_wallet_data.coin)
-                print(f"Generated wallet for {new_wallet_data.coin}: {generated_wallet['address']}")
-                
-                # Create wallet object for storage
-                wallet_data = NewWallet(coin=generated_wallet['coin'])
-                
-                # Store the wallet in database
-                stored_wallet = storage.create_wallet(wallet_data, user, generated_wallet)
-                
-                # Start monitoring the wallet for transactions
-                start_monitoring_wallet(
-                    address=generated_wallet['address'],
-                    coin=generated_wallet['coin'],
-                    user_email=user.email
-                )
-                
-                # Return wallet info (private key NEVER sent for security)
-                response_wallet = {
-                    "coin": generated_wallet['coin'],
-                    "address": generated_wallet['address'],
-                    "balance": "0",
-                    "created": datetime.now().isoformat()
-                }
-                
-                self.write({
-                    "success": True,
-                    "wallet": response_wallet,
-                    "message": "Wallet created successfully and monitoring started. IMPORTANT: Private keys are never transmitted or stored for security reasons."
-                })
-                
-            except Exception as e:
-                print(f"Wallet generation error: {e}")
-                self.set_status(500)
-                self.write({"error": "Failed to generate wallet"})
-                return
+            # Create the new wallet
+            wallet = storage.create_wallet(new_wallet_data, user)
+            
+            self.write({
+                "success": True,
+                "wallet": wallet,
+                "message": "Wallet created successfully"
+            })
             
         except Exception as e:
             print(e)
@@ -736,7 +630,7 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
 def main():
     tornado.options.parse_command_line()
     app = Application()
-    app.listen(8000, address='0.0.0.0')
+    app.listen(APP_PORT, address=APP_HOST)
     #logging.getLogger('tornado.access').disabled = True
     tornado.ioloop.IOLoop.current().start()
 

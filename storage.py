@@ -29,7 +29,8 @@ class DataBase(object):
             print(e)
 
             print('-reconnecting and trying again...')
-            return self.query(sqlquery)        
+            #return self.query(sqlquery)
+            return None
         
     
     def execute(self, sqlquery, vals=None, return_id=False):
@@ -261,27 +262,11 @@ class MemStorage:
         user = self.get_user_by_email(insert_user.email)
         return user
 
-    def create_wallet(self, new_wallet: NewWallet, user: User, generated_wallet: dict = None):
-        # Use generated wallet data if provided, otherwise use new_wallet data
-        address = generated_wallet['address'] if generated_wallet else getattr(new_wallet, 'address', None)
-        coin = generated_wallet['coin'] if generated_wallet else new_wallet.coin
-        # SECURITY: Never store private keys in database - they should only exist temporarily during generation
-        
-        sql = "INSERT INTO wallets (email,coin,address,balance) VALUES ('%s','%s','%s','0')" % (user.email, coin, address)
+    def create_wallet(self, new_wallet: NewWallet, user: User):
+        sql = "INSERT INTO wallets (email,coin,address,balance,privatekey) VALUES ('%s','%s','%s','0','%s')" % (user.email,new_wallet.coin,new_wallet.address,new_wallet.private_key)
         db = DataBase(DB_NAME)
         lastrowid = db.execute(sql, return_id=True)
-        
-        # Return wallet info similar to PostgreSQL format
-        return {
-            "id": str(lastrowid[1]) if lastrowid[0] else None,
-            "email": user.email,
-            "coin": coin,
-            "address": address,
-            "balance": "0",
-            "is_active": True,
-            "created": datetime.now().isoformat(),
-            "updated": datetime.now().isoformat()
-        }
+        return Wallet()
 
     def create_bank_account(self, new_bank_account: NewBankAccount, user: User) -> dict:
         """Create a new bank account for user"""
@@ -360,16 +345,8 @@ class MemStorage:
         ]
         return sorted(user_trades, key=lambda t: t.createdAt, reverse=True)
 
-    def get_market_data(self, pair: str, timeframe: str = "1H") -> List[MarketData]:
-        # Generate market data based on timeframe
-        data_points = self._get_data_points_for_timeframe(timeframe)
-        base_data = self.market_data.get(pair, [])
-        
-        if not base_data and pair in ["BTC/ZAR", "ETH/ZAR", "USDT/ZAR"]:
-            # Generate sample data for the pair
-            return self._generate_sample_data(pair, timeframe, data_points)
-        
-        return base_data[:data_points] if base_data else []
+    def get_market_data(self, pair: str) -> List[MarketData]:
+        return self.market_data.get(pair, [])
 
     def update_market_data(self, data: InsertMarketData) -> MarketData:
         market_data = MarketData(
@@ -390,50 +367,8 @@ class MemStorage:
         self.market_data[data.pair] = filtered
         return market_data
 
-    def get_all_market_data(self, timeframe: str = "1H") -> List[MarketData]:
-        # For all market data, return latest prices regardless of timeframe
-        # In a real implementation, this would aggregate data by timeframe
+    def get_all_market_data(self) -> List[MarketData]:
         return self.latest_prices
-
-    def _get_data_points_for_timeframe(self, timeframe: str) -> int:
-        """Get number of data points to return based on timeframe"""
-        timeframe_points = {
-            "1H": 60,    # 60 minutes
-            "1D": 24,    # 24 hours
-            "1W": 7,     # 7 days
-            "1M": 30,    # 30 days
-            "1Y": 12     # 12 months
-        }
-        return timeframe_points.get(timeframe, 60)
-    
-    def _generate_sample_data(self, pair: str, timeframe: str, data_points: int) -> List[MarketData]:
-        """Generate sample market data for the given pair and timeframe"""
-        from random import random
-        
-        base_prices = {
-            "BTC/ZAR": 1000000,
-            "ETH/ZAR": 50000,
-            "USDT/ZAR": 18.50
-        }
-        
-        base_price = base_prices.get(pair, 10000)
-        sample_data = []
-        
-        for i in range(data_points):
-            # Generate some price variation
-            price_change = (random() - 0.5) * 0.1  # ±5% variation
-            current_price = base_price * (1 + price_change)
-            
-            market_data = MarketData(
-                pair=pair,
-                price=str(current_price),
-                change_24h=str((random() - 0.5) * 10),  # ±5% change
-                volume_24h=str(random() * 1000000),
-                timestamp=datetime.now() - timedelta(hours=i)
-            )
-            sample_data.append(market_data)
-        
-        return sample_data
 
 
 # Global storage instance
