@@ -18,24 +18,102 @@ from typing import Optional, Set
 from pydantic import ValidationError
 from datetime import datetime, timedelta
 from pathlib import Path
-import telebot
+# Optional telebot import
+try:
+    import telebot
+except ImportError:
+    telebot = None
 
 from tornado.options import define, options
 
 from auth_utils import auth_utils
 from models import InsertTrade, InsertMarketData, LoginRequest, RegisterRequest, User, InsertUser, NewWallet, NewBankAccount
 
-from storage_postgres import storage
-from config import GOOGLE_CLIENT_ID
+# Safe config import with fallback
+try:
+    from config import GOOGLE_CLIENT_ID, DATABASE_TYPE
+except ImportError:
+    from config import GOOGLE_CLIENT_ID
+    DATABASE_TYPE = 'mem'
+
+# Safe storage selection with fallbacks
+storage = None
+database_type = os.getenv('DATABASE_TYPE', DATABASE_TYPE).lower()
+
+if database_type == 'postgresql':
+    try:
+        from postgres_storage import storage as _s
+        storage = _s
+        print("Using PostgreSQL storage")
+    except Exception as e:
+        print(f'PostgreSQL unavailable: {e}')
+elif database_type == 'mysql':
+    try:
+        from storage import storage as _s
+        storage = _s
+        print("Using MySQL storage")
+    except Exception as e:
+        print(f'MySQL unavailable: {e}')
+
+# Fallback to in-memory storage if others fail
+if storage is None:
+    print("Using fallback in-memory storage")
+    # Create minimal in-memory storage
+    from models import MarketData
+    import uuid
+    
+    class FallbackStorage:
+        def __init__(self):
+            self.sessions = {}
+            self.latest_prices = [
+                MarketData(pair="BTC/ZAR", price="1000000", change_24h="2.5", volume_24h="1000000", timestamp=datetime.now()),
+                MarketData(pair="ETH/ZAR", price="50000", change_24h="1.8", volume_24h="500000", timestamp=datetime.now()),
+                MarketData(pair="USDT/ZAR", price="18.50", change_24h="0.1", volume_24h="100000", timestamp=datetime.now())
+            ]
+        
+        def get_market_data(self, pair: str, timeframe: str = "1H"):
+            return [data for data in self.latest_prices if data.pair == pair]
+        
+        def get_all_market_data(self, timeframe: str = "1H"):
+            return self.latest_prices
+        
+        def create_session(self, user_id, session_token, expires_at):
+            from models import Session
+            session = Session(user_id=user_id, session_token=session_token, expires_at=expires_at)
+            self.sessions[session_token] = session
+            return session
+        
+        def get_session(self, session_token):
+            session = self.sessions.get(session_token)
+            if session and session.expires_at > datetime.now():
+                return session
+            elif session:
+                del self.sessions[session_token]
+            return None
+        
+        def delete_session(self, session_token):
+            if session_token in self.sessions:
+                del self.sessions[session_token]
+                return True
+            return False
+        
+        def get_user(self, user_id): return None
+        def create_user(self, user): return None
+        def get_wallets(self, user): return []
+        def create_wallet(self, wallet, user): return {}
+        def get_bank_accounts(self, user): return []
+        def create_bank_account(self, account, user): return {}
+    
+    storage = FallbackStorage()
 
 class DateTimeEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        elif isinstance(obj, (int, float)):
-            return str(obj)
+    def default(self, o):
+        if isinstance(o, datetime):
+            return o.isoformat()
+        elif isinstance(o, (int, float)):
+            return str(o)
         else:
-            return super().default(obj)
+            return super().default(o)
       
 class Application(tornado.web.Application):
     coins = {}
@@ -74,6 +152,10 @@ class Application(tornado.web.Application):
             "debug": True
         }
         super(Application, self).__init__(handlers, **settings)
+    
+    def get_auth_headers(self):
+        """Get authentication headers"""
+        return {}
 
     def wathcher(self):
         try:
@@ -136,7 +218,7 @@ class BaseHandler(tornado.web.RequestHandler):
         if not session:
             return None
         
-        return storage.get_user_by_id(session["user_id"])
+        return storage.get_user(session.user_id)
       
 
 class NotFoundHandler(BaseHandler):
@@ -175,7 +257,7 @@ class RegisterHandler(BaseHandler):
             session_token = auth_utils.generate_session_token()
             expires_at = datetime.now() + timedelta(days=7)
             session_data = {"session_token": session_token, "expires_at": expires_at.isoformat()}
-            storage.create_session(user.id, session_data)
+            storage.create_session(user.id, session_token, expires_at)
 
             # Set secure cookie
             self.set_secure_cookie("session_token", session_token, expires_days=7)
@@ -223,7 +305,7 @@ class LoginHandler(BaseHandler):
             session_token = auth_utils.generate_session_token()
             expires_at = datetime.now() + timedelta(days=7)
             session_data = {"session_token": session_token, "expires_at": expires_at.isoformat()}
-            storage.create_session(user.id, session_data)
+            storage.create_session(user.id, session_token, expires_at)
             
             # Set secure cookie
             self.set_secure_cookie("session_token", session_token, expires_days=7)
@@ -322,7 +404,7 @@ class GoogleAuthHandler(BaseHandler):
             session_token = auth_utils.generate_session_token()
             expires_at = datetime.now() + timedelta(days=7)
             session_data = {"session_token": session_token, "expires_at": expires_at.isoformat()}
-            storage.create_session(user.id, session_data)
+            storage.create_session(user.id, session_token, expires_at)
             
             # Set secure cookie
             self.set_secure_cookie("session_token", session_token, expires_days=7)
@@ -516,13 +598,23 @@ class BankAccountCreateHandler(BaseHandler):
 class MarketDataHandler(BaseHandler):
     def get(self, pair: Optional[str] = None):
         try:
+            # Get timeframe parameter with default of "1H"
+            timeframe = self.get_argument("timeframe", "1H")
+            
+            # Validate timeframe
+            valid_timeframes = ["1H", "1D", "1W", "1M", "1Y"]
+            if timeframe not in valid_timeframes:
+                self.set_status(400)
+                self.write({"error": f"Invalid timeframe. Valid options: {', '.join(valid_timeframes)}"})
+                return
+            
             if pair:
-                print("Get specific pair data: /api/market/{pair}")
-                data = storage.get_market_data(pair)
+                print(f"Get specific pair data: /api/market/{pair}?timeframe={timeframe}")
+                data = storage.get_market_data(pair, timeframe)
                 self.write(json.dumps([item.dict(by_alias=True) for item in data], cls=DateTimeEncoder))
             else:
-                print("Get all market data: /api/market")
-                data = storage.get_all_market_data()
+                print(f"Get all market data: /api/market?timeframe={timeframe}")
+                data = storage.get_all_market_data(timeframe)
                 #print(data)
                 self.write(json.dumps([item.dict(by_alias=True) for item in data], cls=DateTimeEncoder))
         except Exception as e:
@@ -614,7 +706,7 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
 def main():
     tornado.options.parse_command_line()
     app = Application()
-    app.listen(5000, address='0.0.0.0')
+    app.listen(8000, address='0.0.0.0')
     #logging.getLogger('tornado.access').disabled = True
     tornado.ioloop.IOLoop.current().start()
 

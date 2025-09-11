@@ -408,10 +408,60 @@ class PostgresStorage:
         ]
         return sorted(user_trades, key=lambda t: t.createdAt, reverse=True)
 
-    def get_market_data(self, pair: str) -> List[MarketData]:
-        return self.market_data.get(pair, [])
+    def get_market_data(self, pair: str, timeframe: str = "1H") -> List[MarketData]:
+        # Generate market data based on timeframe
+        data_points = self._get_data_points_for_timeframe(timeframe)
+        base_data = self.market_data.get(pair, [])
+        
+        if not base_data and pair in ["BTC/ZAR", "ETH/ZAR", "USDT/ZAR"]:
+            # Generate sample data for the pair
+            return self._generate_sample_data(pair, timeframe, data_points)
+        
+        return base_data[:data_points] if base_data else []
 
-    def get_all_market_data(self) -> List[MarketData]:
+    def _get_data_points_for_timeframe(self, timeframe: str) -> int:
+        """Get number of data points to return based on timeframe"""
+        timeframe_points = {
+            "1H": 60,    # 60 minutes
+            "1D": 24,    # 24 hours
+            "1W": 7,     # 7 days
+            "1M": 30,    # 30 days
+            "1Y": 12     # 12 months
+        }
+        return timeframe_points.get(timeframe, 60)
+    
+    def _generate_sample_data(self, pair: str, timeframe: str, data_points: int) -> List[MarketData]:
+        """Generate sample market data for the given pair and timeframe"""
+        from random import random
+        
+        base_prices = {
+            "BTC/ZAR": 1000000,
+            "ETH/ZAR": 50000,
+            "USDT/ZAR": 18.50
+        }
+        
+        base_price = base_prices.get(pair, 10000)
+        sample_data = []
+        
+        for i in range(data_points):
+            # Generate some price variation
+            price_change = (random() - 0.5) * 0.1  # ±5% variation
+            current_price = base_price * (1 + price_change)
+            
+            market_data = MarketData(
+                pair=pair,
+                price=str(current_price),
+                change_24h=str((random() - 0.5) * 10),  # ±5% change
+                volume_24h=str(random() * 1000000),
+                timestamp=datetime.now() - timedelta(hours=i)
+            )
+            sample_data.append(market_data)
+        
+        return sample_data
+
+    def get_all_market_data(self, timeframe: str = "1H") -> List[MarketData]:
+        # For all market data, return latest prices regardless of timeframe
+        # In a real implementation, this would aggregate data by timeframe
         return self.latest_prices
 
 # Create global storage instance
