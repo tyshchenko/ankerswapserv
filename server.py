@@ -28,6 +28,7 @@ from tornado.options import define, options
 
 from auth_utils import auth_utils
 from models import InsertTrade, InsertMarketData, LoginRequest, RegisterRequest, User, InsertUser, NewWallet, NewBankAccount
+from blockchain import generate_wallet, start_monitoring_wallet
 
 # Safe config import with fallback
 try:
@@ -100,7 +101,7 @@ if storage is None:
         def get_user(self, user_id): return None
         def create_user(self, user): return None
         def get_wallets(self, user): return []
-        def create_wallet(self, wallet, user): return {}
+        def create_wallet(self, wallet, user, generated_wallet=None): return {}
         def get_bank_accounts(self, user): return []
         def create_bank_account(self, account, user): return {}
     
@@ -501,7 +502,7 @@ class WalletCreateHandler(BaseHandler):
                 self.write({"error": "Authentication required"})
                 return
             
-            # Validate input data
+            # Validate input data (only coin is required)
             try:
                 new_wallet_data = NewWallet(**body)
             except ValidationError as e:
@@ -517,14 +518,43 @@ class WalletCreateHandler(BaseHandler):
                     self.write({"error": f"Wallet for {new_wallet_data.coin} already exists"})
                     return
             
-            # Create the new wallet
-            wallet = storage.create_wallet(new_wallet_data, user)
-            
-            self.write({
-                "success": True,
-                "wallet": wallet,
-                "message": "Wallet created successfully"
-            })
+            # Generate wallet using blockchain functionality
+            try:
+                generated_wallet = generate_wallet(new_wallet_data.coin)
+                print(f"Generated wallet for {new_wallet_data.coin}: {generated_wallet['address']}")
+                
+                # Create wallet object for storage
+                wallet_data = NewWallet(coin=generated_wallet['coin'])
+                
+                # Store the wallet in database
+                stored_wallet = storage.create_wallet(wallet_data, user, generated_wallet)
+                
+                # Start monitoring the wallet for transactions
+                start_monitoring_wallet(
+                    address=generated_wallet['address'],
+                    coin=generated_wallet['coin'],
+                    user_email=user.email
+                )
+                
+                # Return wallet info (private key NEVER sent for security)
+                response_wallet = {
+                    "coin": generated_wallet['coin'],
+                    "address": generated_wallet['address'],
+                    "balance": "0",
+                    "created": datetime.now().isoformat()
+                }
+                
+                self.write({
+                    "success": True,
+                    "wallet": response_wallet,
+                    "message": "Wallet created successfully and monitoring started. IMPORTANT: Private keys are never transmitted or stored for security reasons."
+                })
+                
+            except Exception as e:
+                print(f"Wallet generation error: {e}")
+                self.set_status(500)
+                self.write({"error": "Failed to generate wallet"})
+                return
             
         except Exception as e:
             print(e)

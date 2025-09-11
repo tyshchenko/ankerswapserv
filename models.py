@@ -70,8 +70,7 @@ class Wallet(BaseModel):
 
 class NewWallet(BaseModel):
     coin: str
-    address: Optional[str] = None
-    private_key: Optional[str] = None
+    # address and private_key will be generated automatically
 
     
 class BankAccount(BaseModel):

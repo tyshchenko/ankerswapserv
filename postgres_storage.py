@@ -284,15 +284,19 @@ class PostgresStorage:
                 
                 return wallets
 
-    def create_wallet(self, new_wallet: NewWallet, user: User) -> dict:
+    def create_wallet(self, new_wallet: NewWallet, user: User, generated_wallet: dict = None) -> dict:
         """Create a new wallet for user"""
         with self.get_connection() as conn:
             with conn.cursor() as cur:
+                # Use generated wallet data if provided, otherwise use new_wallet data
+                address = generated_wallet['address'] if generated_wallet else getattr(new_wallet, 'address', None)
+                coin = generated_wallet['coin'] if generated_wallet else new_wallet.coin
+                
                 cur.execute("""
                     INSERT INTO wallets (email, coin, address, balance)
                     VALUES (%s, %s, %s, 0)
                     RETURNING id, email, coin, address, balance, is_active, created, updated
-                """, (user.email, new_wallet.coin, new_wallet.address))
+                """, (user.email, coin, address))
                 wallet_row = cur.fetchone()
                 conn.commit()
                 

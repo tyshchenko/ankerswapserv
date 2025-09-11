@@ -261,10 +261,27 @@ class MemStorage:
         user = self.get_user_by_email(insert_user.email)
         return user
 
-    def create_wallet(self, new_wallet: NewWallet, user: User):
-        sql = "INSERT INTO wallets (email,coin,address,balance,privatekey) VALUES ('%s','%s','%s','0','%s')" % (user.email,new_wallet.coin,new_wallet.address,new_wallet.private_key)
+    def create_wallet(self, new_wallet: NewWallet, user: User, generated_wallet: dict = None):
+        # Use generated wallet data if provided, otherwise use new_wallet data
+        address = generated_wallet['address'] if generated_wallet else getattr(new_wallet, 'address', None)
+        coin = generated_wallet['coin'] if generated_wallet else new_wallet.coin
+        # SECURITY: Never store private keys in database - they should only exist temporarily during generation
+        
+        sql = "INSERT INTO wallets (email,coin,address,balance) VALUES ('%s','%s','%s','0')" % (user.email, coin, address)
         db = DataBase(DB_NAME)
         lastrowid = db.execute(sql, return_id=True)
+        
+        # Return wallet info similar to PostgreSQL format
+        return {
+            "id": str(lastrowid[1]) if lastrowid[0] else None,
+            "email": user.email,
+            "coin": coin,
+            "address": address,
+            "balance": "0",
+            "is_active": True,
+            "created": datetime.now().isoformat(),
+            "updated": datetime.now().isoformat()
+        }
 
     def create_bank_account(self, new_bank_account: NewBankAccount, user: User) -> dict:
         """Create a new bank account for user"""
