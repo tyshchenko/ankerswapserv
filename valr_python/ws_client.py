@@ -1,6 +1,4 @@
 import asyncio
-import threading
-import datetime
 from typing import Callable
 from typing import Dict
 from typing import List
@@ -886,9 +884,6 @@ class WebSocketClient:
                  trade_subscriptions: Optional[List[str]] = None):
         self._api_key = api_key
         self._api_secret = api_secret
-        self.my_websocket = None
-        self.activitytime = 0
-
         self._ws_type = WebSocketType[ws_type.upper()]
         self._hooks = {get_event_type(self._ws_type)[e.upper()]: f for e, f in hooks.items()}
         if currency_pairs:
@@ -917,21 +912,11 @@ class WebSocketClient:
         """
         headers = _get_valr_headers(api_key=self._api_key, api_secret=self._api_secret, method='GET',
                                     path=self._ws_type.value, data='')
-        ws = await websockets.connect(self._uri, ssl=True, extra_headers=headers)
-        try:
-            self.my_websocket = ws
+        async with websockets.connect(self._uri, ssl=True, extra_headers=headers) as ws:
             if self._ws_type == WebSocketType.TRADE:
                 await ws.send(self.get_subscribe_data(self._currency_pairs, self._trade_subscriptions))
-                data = {
-                    "type": MessageFeedType.PING.name
-                }
-                await ws.send(json.dumps(data, default=str))
-
             async for message in ws:
                 data = json.loads(message)
-                self.activitytime = 0
-                if data['type'] not in (TradeEvent.AGGREGATED_ORDERBOOK_UPDATE.name):
-                  print(data['type'])
                 try:
                     # ignore auth and subscription response messages
                     if data['type'] not in (MessageFeedType.SUBSCRIBED.name, MessageFeedType.AUTHENTICATED.name):
@@ -946,22 +931,6 @@ class WebSocketClient:
                     if data['type'] in events:
                         raise HookNotFoundError(f'no hook supplied for {data["type"]} event')
                     raise WebSocketAPIException(f'WebSocket API failed to handle {data["type"]} event: {data}')
-        except websockets.ConnectionClosed:
-            self.my_websocket = None
-
-    def sendping(self):
-      print("                            %s PING start %s" % (datetime.datetime.now(),self.activitytime))
-      if self.my_websocket:
-        self.activitytime += 1
-        
-        if self.activitytime > 20:
-          print("                          CLOSE")
-          self.my_websocket.close()
-          
-
-      else:
-        print("                          no websokets")
- 
 
     @staticmethod
     def get_subscribe_data(currency_pairs, events) -> JSONType:
@@ -972,4 +941,3 @@ class WebSocketClient:
             "subscriptions": subscriptions
         }
         return json.dumps(data, default=str)
-

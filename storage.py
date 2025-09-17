@@ -3,13 +3,17 @@ from datetime import datetime, timedelta
 import random
 import requests
 import string
+import time
+import threading
+
 
 import pymysqlpool #pymysql-pool
 from valr_python import Client
 
-from models import User, InsertUser, Trade, InsertTrade, MarketData, InsertMarketData, Session, Wallet, BankAccount, NewWallet, NewBankAccount
+from models import User, InsertUser, Trade, InsertTrade, MarketData, Session, Wallet, BankAccount, NewWallet, FullWallet, NewBankAccount, OhlcvMarketData
 
-from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, VALR_KEY, VALR_SECRET
+from config import DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, VALR_KEY, VALR_SECRET, COIN_SETTINGS, SUBACCOUNT
+from blockchain import blockchain
 
 class DataBase(object):
     def __init__(self, database):
@@ -54,11 +58,13 @@ class DataBase(object):
 
 
 
-class MemStorage:
+class MySqlStorage:
     def __init__(self):
+        self.cache = {}
 
         self.trades: Dict[str, Trade] = {}
-        self.market_data: Dict[str, List[MarketData]] = {}
+        self.market_data: Dict[str, Dict[str, List[MarketData]]] = {}
+        self.ohlcv_market_data: Dict[str, Dict[str, List[OhlcvMarketData]]] = {}
         self.latest_prices: List[MarketData] = []
         self.sessions: Dict[str, Session] = {}
         self.pairs = ["BTC/ZAR", "ETH/ZAR", "USDT/ZAR", "BNB/ZAR", "TRX/ZAR", "SOL/ZAR"]
@@ -67,21 +73,55 @@ class MemStorage:
 
         self._initialize_market_data()
         self.update_latest_prices()
-
-    def _initialize_market_data(self):
-        pairs = self.activepairs
-        prices = self.get_prices()
+        threading.Timer(120.0, self.cacheclearer).start()
+#        print(self.get_miner_fee())
+        print("!!!!!!!!!!!!!!!")
+        print(self.get_all_balances())
+        print("!!!!!!!!!!!!!!!")
+        print(self.get_deposit_addresses())
+        blockchain.move_from_hot()
         
 
+    def cacheclearer(self):
+      try:
+        print("%s clean cache" % datetime.now())
+        newcache = self.cache.copy()
+        for key, value in newcache.items():
+          try:
+            if value['time'] < int(round(time.time()))-61:
+                del self.cache[key]
+          except Exception as e: print(e)
+        del newcache
+      except Exception as e: print(e)
+      threading.Timer(120.0, self.cacheclearer).start()
+
+
+    def reinitialize_market_data_1h(self):
+        pairs = self.activepairs
+        
+        self.market_data['1H'] = {}
+        self.ohlcv_market_data['1H'] = {}
+          
         for pair in pairs:
-            base_price = prices.get(pair.replace('/',''), float("1"))
             data = []
-            url = "https://min-api.cryptocompare.com/data/v2/histohour?fsym=%s&tsym=%s&limit=72&e=CCCAGG" % (pair.split('/')[0],pair.split('/')[1])
+            ohlcvdata = []
+            url = "https://min-api.cryptocompare.com/data/v2/histohour?fsym=%s&tsym=%s&limit=180&e=CCCAGG" % (pair.split('/')[0],pair.split('/')[1])
             result = requests.get(url, headers={"Content-Type": "application/json"})
             data72 = result.json()
 
-            # Generate 72 hours of hourly data
+            # Generate 180 hours of hourly data
             for step in data72['Data']['Data']:
+                ohlcvdata.append(OhlcvMarketData(
+                    pair=pair,
+                    price=str(step['open']),
+                    open=str(step['open']),
+                    high=str(step['high']),
+                    low=str(step['low']),
+                    close=str(step['close']),
+                    change_24h="0.00",
+                    volume_24h=str(step['volumeto']),
+                    timestamp=datetime.fromtimestamp(int(step['time']))
+                ))
                 
                 data.append(MarketData(
                     pair=pair,
@@ -91,14 +131,153 @@ class MemStorage:
                     timestamp=datetime.fromtimestamp(int(step['time']))
                 ))
             
-            self.market_data[pair] = data
+            self.ohlcv_market_data['1H'][pair] = ohlcvdata
+            self.market_data['1H'][pair] = data
+        print("1H re_initialized")
 
+
+
+
+    def reinitialize_market_data_1d(self):
+        pairs = self.activepairs
+        self.market_data['1D'] = {}
+        self.ohlcv_market_data['1D'] = {}
+        for pair in pairs:
+            data = []
+            ohlcvdata = []
+            url = "https://min-api.cryptocompare.com/data/v2/histoday?fsym=%s&tsym=%s&limit=180&e=CCCAGG" % (pair.split('/')[0],pair.split('/')[1])
+            result = requests.get(url, headers={"Content-Type": "application/json"})
+            data72 = result.json()
+
+            # Generate 72 hours of hourly data
+            for step in data72['Data']['Data']:
+                ohlcvdata.append(OhlcvMarketData(
+                    pair=pair,
+                    price=str(step['open']),
+                    open=str(step['open']),
+                    high=str(step['high']),
+                    low=str(step['low']),
+                    close=str(step['close']),
+                    change_24h="0.00",
+                    volume_24h=str(step['volumeto']),
+                    timestamp=datetime.fromtimestamp(int(step['time']))
+                ))
+                
+                data.append(MarketData(
+                    pair=pair,
+                    price=str(step['open']),
+                    change_24h="0.00",
+                    volume_24h=str(step['volumeto']),
+                    timestamp=datetime.fromtimestamp(int(step['time']))
+                ))
+            
+            self.ohlcv_market_data['1D'][pair] = ohlcvdata
+            self.market_data['1D'][pair] = data
+        print("1D re_initialized")
+
+
+    def reinitialize_market_data_1w(self):
+        pairs = self.activepairs
+        self.market_data['1W'] = {}
+        self.ohlcv_market_data['1W'] = {}
+        for pair in pairs:
+            data = []
+            ohlcvdata = []
+            url = "https://min-api.cryptocompare.com/data/v2/histoday?fsym=%s&tsym=%s&limit=180&aggregate=7&e=CCCAGG" % (pair.split('/')[0],pair.split('/')[1])
+            result = requests.get(url, headers={"Content-Type": "application/json"})
+            data72 = result.json()
+
+            # Generate 72 hours of hourly data
+            for step in data72['Data']['Data']:
+                ohlcvdata.append(OhlcvMarketData(
+                    pair=pair,
+                    price=str(step['open']),
+                    open=str(step['open']),
+                    high=str(step['high']),
+                    low=str(step['low']),
+                    close=str(step['close']),
+                    change_24h="0.00",
+                    volume_24h=str(step['volumeto']),
+                    timestamp=datetime.fromtimestamp(int(step['time']))
+                ))
+                
+                data.append(MarketData(
+                    pair=pair,
+                    price=str(step['open']),
+                    change_24h="0.00",
+                    volume_24h=str(step['volumeto']),
+                    timestamp=datetime.fromtimestamp(int(step['time']))
+                ))
+            
+            self.ohlcv_market_data['1W'][pair] = ohlcvdata
+            self.market_data['1W'][pair] = data
+        print("1W re_initialized")
+
+
+    def reinitialize_market_data_1m(self):
+        pairs = self.activepairs
+
+        self.market_data['1M'] = {}
+        self.ohlcv_market_data['1M'] = {}
+        for pair in pairs:
+            data = []
+            ohlcvdata = []
+            url = "https://min-api.cryptocompare.com/data/v2/histoday?fsym=%s&tsym=%s&limit=180&aggregate=30&e=CCCAGG" % (pair.split('/')[0],pair.split('/')[1])
+            result = requests.get(url, headers={"Content-Type": "application/json"})
+            data72 = result.json()
+
+            # Generate 72 hours of hourly data
+            for step in data72['Data']['Data']:
+                ohlcvdata.append(OhlcvMarketData(
+                    pair=pair,
+                    price=str(step['open']),
+                    open=str(step['open']),
+                    high=str(step['high']),
+                    low=str(step['low']),
+                    close=str(step['close']),
+                    change_24h="0.00",
+                    volume_24h=str(step['volumeto']),
+                    timestamp=datetime.fromtimestamp(int(step['time']))
+                ))
+                
+                data.append(MarketData(
+                    pair=pair,
+                    price=str(step['open']),
+                    change_24h="0.00",
+                    volume_24h=str(step['volumeto']),
+                    timestamp=datetime.fromtimestamp(int(step['time']))
+                ))
+            
+            self.ohlcv_market_data['1M'][pair] = ohlcvdata
+            self.market_data['1M'][pair] = data
+        print("1M re_initialized")
+
+
+
+    def _initialize_market_data(self):
+        print("_initialize_market_data")
+        self.reinitialize_market_data_1h()
+        self.reinitialize_market_data_1d()
+        self.reinitialize_market_data_1w()
+        self.reinitialize_market_data_1m()
+        print("_initialize_market_data DONE")
+            
+
+            
     def randomstr(self, str_len):
         """---Get random string---"""
         return "".join(random.choice(string.digits + string.ascii_uppercase) for _ in range(str_len))
 
     def create_reference(self, user_id):
         return 'APB' + str(user_id) + self.randomstr(6)
+
+    def get_tx_hashes(self):
+        db = DataBase(DB_NAME)
+        uniqueidlist = []
+        allidx = db.query("SELECT txhash FROM transactions group by txhash")
+        for idx in allidx:
+          uniqueidlist.append(idx[0])
+        return uniqueidlist
 
     def fill_user(self, users) -> Optional[User]:
         if users:
@@ -131,6 +310,7 @@ class MemStorage:
           return None
 
     def update_latest_prices(self):
+        print("update_latest_prices")
         pairs = self.pairs
         prices = self.get_prices()
         
@@ -148,6 +328,20 @@ class MemStorage:
                     timestamp=timestamp
                 )
                 all_data.append(data)
+                if pair in self.activepairs:
+                  try:
+                    self.market_data['1H'][pair][180].price = str(base_data['markPrice'])
+                    self.market_data['1D'][pair][180].price = str(base_data['markPrice'])
+                    self.market_data['1W'][pair][180].price = str(base_data['markPrice'])
+                    self.market_data['1M'][pair][len(self.market_data['1M'][pair])-1].price = str(base_data['markPrice'])
+                    self.ohlcv_market_data['1H'][pair][180].close = str(base_data['markPrice'])
+                    self.ohlcv_market_data['1D'][pair][180].close = str(base_data['markPrice'])
+                    self.ohlcv_market_data['1W'][pair][180].close = str(base_data['markPrice'])
+                    self.ohlcv_market_data['1M'][pair][len(self.ohlcv_market_data['1M'][pair])-1].close = str(base_data['markPrice'])
+                  except Exception as e: 
+                    print(e)
+                    
+                
             else:
                 data = MarketData(
                     pair=pair,
@@ -158,6 +352,7 @@ class MemStorage:
                 )
                 all_data.append(data)
         self.latest_prices = all_data
+        print("update_latest_prices DONE")
               
 
     def get_valr(self):
@@ -166,12 +361,83 @@ class MemStorage:
         return c
 
     def get_prices(self):
+      key = 'getPrices'
+      if key in self.cache:
+        return self.cache[key]['data']
+      else:
         client = self.get_valr()
         prices = client.get_market_summary()
         pricedict = {}
         for price in prices:
           pricedict[price['currencyPair']] = price
+          
+        jblock = {'time':int(round(time.time())), 'data':pricedict}
+        self.cache[key] = jblock
         return pricedict
+
+    def get_miner_fee(self):
+      key = 'get_miner_fee'
+      if key in self.cache:
+        return self.cache[key]['data']
+      else:
+        client = self.get_valr()
+        fees = {'ZAR':0}
+        for coin in COIN_SETTINGS:
+          winfo = client.get_crypto_withdrawal_info(coin)
+          fees[coin] = float(winfo['withdrawCost'])
+
+        jblock = {'time':int(round(time.time())), 'data':fees}
+        self.cache[key] = jblock
+        return fees
+
+
+
+
+    def get_all_balances(self):
+        client = self.get_valr()
+        allbalances = client.get_nonzero_balances()
+
+        return allbalances
+
+    def get_deposit_addresses(self):
+        client = self.get_valr()
+        addresses = {'ZAR':''}
+        for coin in COIN_SETTINGS:
+          address = client.get_deposit_address(coin, SUBACCOUNT)
+          addresses[coin] = address
+          
+
+        return addresses
+
+    def move_pending_zar(self):
+        client = self.get_valr()
+        #allbalances = client.get_all_balances()
+        sql = "select sum(pending + 0) from wallets where coin='ZAR'"
+        db = DataBase(DB_NAME)
+        pending_zar = db.query(sql)
+        zaramount = float(pending_zar[0][0])
+        if zaramount > 0:
+          client.post_internal_transfer_subaccounts('0',SUBACCOUNT,'ZAR',str(int(zaramount)))
+          sql = "update wallets set balance=(balance+0)+(pending+0), pending='0' where coin='ZAR' and pending != '0'"
+          success, account_id = db.execute(sql, return_id=True)
+
+    def move_pending_crypto(self):
+        client = self.get_valr()
+        #allbalances = client.get_all_balances()
+        sql = "select sum(pending + 0), coin from wallets group by coin"
+        db = DataBase(DB_NAME)
+        pendings = db.query(sql)
+        for pendingcrypto in pendings:
+          amount = float(pendingcrypto[0])
+          coin = pendingcrypto[1]
+          if amount > 0 and coin !='ZAR':
+            
+            
+            sql = "update wallets set balance=(balance+0)+(pending+0), pending='0' where coin='%s' and pending != '0'" % coin
+            print(sql)
+#            success, account_id = db.execute(sql, return_id=True)
+
+
 
     def get_user(self, user_id: str) -> Optional[User]:
         sql = "select "+self.usersfields+" from users where id=%s" % user_id
@@ -213,12 +479,71 @@ class MemStorage:
         sql = "select id,email,coin,address,balance,is_active,created,updated from wallets where email='%s'" % user.email
         db = DataBase(DB_NAME)
         wallets = db.query(sql)
-        print(wallets)
         if not wallets:
           new_zar_wallet = NewWallet(coin='ZAR')
           self.create_wallet(new_zar_wallet,user)
           wallets = db.query(sql)
         return wallets
+
+    def get_all_wallets(self, coins) -> Optional[List[FullWallet]]:
+        sql = "select id,email,coin,address,balance,is_active,privatekey,created,updated,hotwalet from wallets where is_active=1 and privatekey>'' and coin IN('%s')" % ("','".join(coins))
+        db = DataBase(DB_NAME)
+        wallets = db.query(sql)
+        allwallets = []
+        for wallet in wallets:
+          allwallets.append(FullWallet(
+                email = wallet[1],
+                coin = wallet[2],
+                address = wallet[3],
+                balance = wallet[4],
+                hotwalet = wallet[9],
+                is_active = wallet[5],
+                privatekey = wallet[6],
+                created_at = wallet[7],
+                updated_at = wallet[8],
+            ))
+        return allwallets
+
+    def update_wallet_balance(self, wallet: FullWallet, walletbalance, hasheslist):
+        txhashes = hasheslist
+        prevbalance = float(wallet.balance)
+        transactions = []
+        if float(walletbalance) == 0 and wallet.coin == 'BTC':
+          transactions = []
+        else:
+          transactions = blockchain.get_transactions(wallet)
+#        print(transactions)
+        for tx in transactions:
+          if tx['hash'] not in txhashes:
+            txhashes.append(tx['hash'])
+            db = DataBase(DB_NAME)
+            if tx['side'] == 'Deposit':
+              minerfee = self.get_miner_fee(wallet.coin)
+              tocoinamount = COIN_SETTINGS[wallet.coin]['format'] % (int(tx['amount'])/COIN_SETTINGS[wallet.coin]['decimals']+prevbalance-minerfee)
+              sql = "UPDATE wallets set balance='%s', hotwalet='%s'  where privatekey='%s' and email='%s' and coin='%s'" % (tocoinamount,walletbalance,wallet.privatekey,wallet.email,wallet.coin)
+              success, account_id = db.execute(sql, return_id=True)
+            
+              deposittocoinamount = COIN_SETTINGS[wallet.coin]['format'] % (int(tx['amount'])/COIN_SETTINGS[wallet.coin]['decimals'])
+              sql = "INSERT INTO transactions (email, coin, side, amount, price, status, txhash, txtype) VALUES ('%s','%s','%s','%s','0','complete', '%s', 'user')" % (
+                    wallet.email, wallet.coin, tx['side'], deposittocoinamount, tx['hash']
+              )
+              success, account_id = db.execute(sql, return_id=True)
+
+              sql = "INSERT INTO transactions (email, coin, side, amount, price, status, txhash, txtype) VALUES ('%s','%s','Fee','%s','0','complete', '%s', 'user')" % (
+                    wallet.email, wallet.coin, (COIN_SETTINGS[wallet.coin]['format'] % (int(minerfee))), tx['hash']
+              )
+              success, account_id = db.execute(sql, return_id=True)
+            else:
+              deposittocoinamount = COIN_SETTINGS[wallet.coin]['format'] % (int(tx['amount'])/COIN_SETTINGS[wallet.coin]['decimals'])
+              sql = "INSERT INTO transactions (email, coin, side, amount, price, status, txhash, txtype) VALUES ('%s','%s','%s','%s','0','complete', '%s', 'system')" % (
+                    wallet.email, wallet.coin, tx['side'], deposittocoinamount, tx['hash']
+              )
+              success, account_id = db.execute(sql, return_id=True)
+              sql = "UPDATE wallets set hotwalet='%s'  where privatekey='%s' and email='%s' and coin='%s'" % (walletbalance,wallet.privatekey,wallet.email,wallet.coin)
+              success, account_id = db.execute(sql, return_id=True)
+
+
+        return txhashes
 
     def get_bankaccounts(self, user: User) -> Optional[BankAccount]:
         sql = "select id,email,account_name,account_number,branch_code,created,updated from bank_accounts where email='%s'" % user.email
@@ -262,11 +587,25 @@ class MemStorage:
         user = self.get_user_by_email(insert_user.email)
         return user
 
-    def create_wallet(self, new_wallet: NewWallet, user: User):
-        sql = "INSERT INTO wallets (email,coin,address,balance,privatekey) VALUES ('%s','%s','%s','0','%s')" % (user.email,new_wallet.coin,new_wallet.address,new_wallet.private_key)
+    def create_wallet(self, new_wallet: NewWallet, user: User) -> Wallet:
+        generated = blockchain.generate_wallet(new_wallet)
+        address=''
+        private_key=''
+        coin=new_wallet.coin
+        if generated:
+          address=generated.address
+          private_key=generated.private_key
+          
+        sql = "INSERT INTO wallets (email,coin,address,balance,privatekey) VALUES ('%s','%s','%s','0','%s')" % (user.email,coin,address,private_key)
         db = DataBase(DB_NAME)
         lastrowid = db.execute(sql, return_id=True)
-        return Wallet()
+        return Wallet(
+            email = user.email,
+            coin = coin,
+            address = address,
+            balance = "0",
+            is_active = True,
+          )
 
     def create_bank_account(self, new_bank_account: NewBankAccount, user: User) -> dict:
         """Create a new bank account for user"""
@@ -345,31 +684,32 @@ class MemStorage:
         ]
         return sorted(user_trades, key=lambda t: t.createdAt, reverse=True)
 
-    def get_market_data(self, pair: str) -> List[MarketData]:
-        return self.market_data.get(pair, [])
+    def get_user_transactions(self, user_id: str) -> List[Trade]:
+        user_trades = [
+            trade for trade in self.trades.values() 
+            if trade.userId == user_id
+        ]
+        return sorted(user_trades, key=lambda t: t.createdAt, reverse=True)
 
-    def update_market_data(self, data: InsertMarketData) -> MarketData:
-        market_data = MarketData(
-            pair=data.pair,
-            price=str(data.price),
-            change_24h=str(data.change24h),
-            volume_24h=str(data.volume24h),
-            timestamp=datetime.now()
-        )
+    def get_market_data(self, pair: str, timeframe: str, charttype: str) -> List[OhlcvMarketData]:
+        if charttype == 'OHLCV':
+          timedata = self.ohlcv_market_data.get(timeframe, None)
+          if timedata:
+            return timedata.get(pair, [])
+          else:
+            return []
+        else:
+          timedata = self.market_data.get(timeframe, None)
+          if timedata:
+            return timedata.get(pair, [])
+          else:
+            return []
 
-        existing = self.market_data.get(data.pair, [])
-        existing.append(market_data)
-        
-        # Keep only last 72 hours of data
-        cutoff = datetime.now() - timedelta(hours=72)
-        filtered = [d for d in existing if d.timestamp > cutoff]
-        
-        self.market_data[data.pair] = filtered
-        return market_data
+
 
     def get_all_market_data(self) -> List[MarketData]:
         return self.latest_prices
 
 
 # Global storage instance
-storage = MemStorage()
+storage = MySqlStorage()

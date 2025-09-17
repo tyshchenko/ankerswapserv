@@ -69,10 +69,27 @@ class Wallet(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
+class FullWallet(BaseModel):
+    email: str
+    coin: str
+    address: str
+    balance: str = "0"
+    hotwalet: str = "0"
+    is_active: bool = True
+    privatekey: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
 class NewWallet(BaseModel):
     coin: str
+    address: Optional[str] = None
+    private_key: Optional[str] = None
     # address and private_key will be generated automatically
 
+class GeneratedWallet(BaseModel):
+    coin: str
+    address: str
+    private_key: str
     
 class BankAccount(BaseModel):
     email: str
@@ -139,11 +156,18 @@ class MarketData(BaseModel):
 
     model_config = {"populate_by_name": True}
 
-
-class InsertMarketData(BaseModel):
+class OhlcvMarketData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     pair: str
-    price: float
-    change24h: Optional[float] = Field(None, alias="change_24h")
-    volume24h: Optional[float] = Field(None, alias="volume_24h")
-
+    price: str
+    open: str
+    high: str
+    low: str
+    close: str
+    change24h: Optional[str] = Field(None, alias="change_24h")
+    volume24h: Optional[str] = Field(None, alias="volume_24h")
+    timestamp: datetime = Field(default_factory=datetime.now)
+    
     model_config = {"populate_by_name": True}
+
+

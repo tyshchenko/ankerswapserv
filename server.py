@@ -27,10 +27,10 @@ except ImportError:
 from tornado.options import define, options
 
 from auth_utils import auth_utils
-from models import InsertTrade, InsertMarketData, LoginRequest, RegisterRequest, User, InsertUser, NewWallet, NewBankAccount
-from blockchain import generate_wallet, start_monitoring_wallet
+from models import InsertTrade, LoginRequest, RegisterRequest, User, InsertUser, NewWallet, NewBankAccount, FullWallet
+from blockchain import blockchain
 
-from config import GOOGLE_CLIENT_ID, DATABASE_TYPE, APP_PORT, APP_HOST
+from config import GOOGLE_CLIENT_ID, DATABASE_TYPE, APP_PORT, APP_HOST, ACTIVE_COINS,COIN_SETTINGS
 
 if DATABASE_TYPE == 'postgresql':
     from postgres_storage import storage
@@ -51,14 +51,18 @@ class Application(tornado.web.Application):
     
     def __init__(self):
         print("%s start starting" % datetime.now())
-        self.cache = {}
-        threading.Timer(17.0, self.wathcher).start()
+        threading.Timer(60.0, self.wathcher).start()
+        threading.Timer(1800.0, self.hourlywathcher).start()
+        threading.Timer(1.0, self.coin_wathcher).start()
+
+        blockchain.generate_main_wallet()
     
 
         handlers = [
             # API routes
             (r"/api/market/(.+)", MarketDataHandler),
             (r"/api/market", MarketDataHandler),
+            (r"/api/transactions/(.+)", TransactionsHandler),
             (r"/api/trades", TradesHandler),
             (r"/api/trades/(.+)", UserTradesHandler),
             (r"/api/wallets", WalletsHandler),
@@ -86,13 +90,49 @@ class Application(tornado.web.Application):
 
     def wathcher(self):
         try:
+          print("\n%s \n" % datetime.now())
           storage.update_latest_prices()
-          print("\n %s \n" % datetime.now())
-          print(str(float(str((random.random() - 0.5) * 5))))
         except Exception as e: print(e)
         threading.Timer(60.0, self.wathcher).start()
 
+    def hourlywathcher(self):
+        try:
+          print("\n%s \n" % datetime.now())
+          storage._initialize_market_data()
+        except Exception as e: print(e)
+        threading.Timer(1800.0, self.hourlywathcher).start()
 
+    def coin_wathcher(self):
+        try:
+          print("\n%s check coins\n" % datetime.now())
+          allwallets = storage.get_all_wallets(ACTIVE_COINS)
+          txhashes = storage.get_tx_hashes()
+          for onewallet in allwallets:
+
+            print(onewallet.address)
+            walletbalance = blockchain.get_balance(onewallet)
+            print(walletbalance)
+            if int(walletbalance) > COIN_SETTINGS[onewallet.coin]['min_send_amount']:
+              print("FORWARD " + onewallet.coin)
+              blockchain.forward_to_hot(onewallet)
+              
+            if walletbalance != onewallet.hotwalet:
+              print("BALANCE changed")
+              txhashes = storage.update_wallet_balance(onewallet, walletbalance, txhashes)
+              
+            
+        except Exception as e: print(e)
+        try:
+          print("\n%s check pending ZAR\n" % datetime.now())
+          storage.move_pending_zar()
+        except Exception as e: print(e)
+        
+        try:
+          print("\n%s check pending crypto\n" % datetime.now())
+          storage.move_pending_crypto()
+        except Exception as e: print(e)
+        
+        threading.Timer(77.0, self.coin_wathcher).start()
 
 class BaseHandler(tornado.web.RequestHandler):
     def set_default_headers(self):
@@ -390,12 +430,15 @@ class WalletsHandler(BaseHandler):
             
             # Format wallet data
             wallet_data = []
+            miner_fee = storage.get_miner_fee()
+            print(miner_fee)
             if wallets:
                 for wallet in wallets:
                     wallet_data.append({
                         "id": str(wallet[0]),
                         "email": wallet[1],
                         "coin": wallet[2],
+                        "fee": miner_fee[wallet[2]],
                         "address": wallet[3],
                         "balance": str(wallet[4]),
                         "is_active": wallet[5],
@@ -429,6 +472,7 @@ class WalletCreateHandler(BaseHandler):
             try:
                 new_wallet_data = NewWallet(**body)
             except ValidationError as e:
+                print("Invalid wallet data", e.errors())
                 self.set_status(400)
                 self.write({"error": "Invalid wallet data", "details": e.errors()})
                 return
@@ -437,6 +481,7 @@ class WalletCreateHandler(BaseHandler):
             existing_wallets = storage.get_wallets(user)
             for wallet in existing_wallets:
                 if wallet[2] == new_wallet_data.coin:  # wallet[2] is the coin field
+                    print(f"Wallet for {new_wallet_data.coin} already exists")
                     self.set_status(400)
                     self.write({"error": f"Wallet for {new_wallet_data.coin} already exists"})
                     return
@@ -446,7 +491,7 @@ class WalletCreateHandler(BaseHandler):
             
             self.write({
                 "success": True,
-                "wallet": wallet,
+                "wallet": wallet.dict(),
                 "message": "Wallet created successfully"
             })
             
@@ -524,9 +569,10 @@ class MarketDataHandler(BaseHandler):
         try:
             # Get timeframe parameter with default of "1H"
             timeframe = self.get_argument("timeframe", "1H")
-            
+            charttype = self.get_argument("type", "line")
+
             # Validate timeframe
-            valid_timeframes = ["1H", "1D", "1W", "1M", "1Y"]
+            valid_timeframes = ["1H", "1D", "1W", "1M"]
             if timeframe not in valid_timeframes:
                 self.set_status(400)
                 self.write({"error": f"Invalid timeframe. Valid options: {', '.join(valid_timeframes)}"})
@@ -534,11 +580,11 @@ class MarketDataHandler(BaseHandler):
             
             if pair:
                 print(f"Get specific pair data: /api/market/{pair}?timeframe={timeframe}")
-                data = storage.get_market_data(pair, timeframe)
+                data = storage.get_market_data(pair, timeframe, charttype)
                 self.write(json.dumps([item.dict(by_alias=True) for item in data], cls=DateTimeEncoder))
             else:
                 print(f"Get all market data: /api/market?timeframe={timeframe}")
-                data = storage.get_all_market_data(timeframe)
+                data = storage.get_all_market_data()
                 #print(data)
                 self.write(json.dumps([item.dict(by_alias=True) for item in data], cls=DateTimeEncoder))
         except Exception as e:
@@ -568,6 +614,16 @@ class UserTradesHandler(BaseHandler):
     def get(self, user_id: str):
         try:
             trades = storage.get_user_trades(user_id)
+            self.write({"data": [trade.dict(by_alias=True) for trade in trades]})
+        except Exception as e:
+            print(e)
+            self.set_status(500)
+            self.write({"error": "Failed to fetch trades"})
+
+class TransactionsHandler(BaseHandler):
+    def get(self, user_id: str):
+        try:
+            trades = storage.get_user_transactions(user_id)
             self.write({"data": [trade.dict(by_alias=True) for trade in trades]})
         except Exception as e:
             print(e)

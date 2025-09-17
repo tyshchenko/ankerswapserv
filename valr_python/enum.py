@@ -2,11 +2,16 @@ from enum import Enum
 from enum import auto
 
 __all__ = (
+    'Side',
     'WebSocketType',
     'MessageFeedType',
     'TradeEvent',
     'AccountEvent',
     'OrderStatusType',
+    'OrderType',
+    'StopLimitType',
+    'TimeInForce',
+    'BatchOrderType',
     'TransactionType',
     'CurrencyPair',
 )
@@ -42,7 +47,6 @@ class TradeEvent(NameStrEnum):
     MARKET_SUMMARY_UPDATE = auto()
     NEW_TRADE_BUCKET = auto()
     NEW_TRADE = auto()
-    PONG = auto()
 
 
 class AccountEvent(NameStrEnum):
@@ -69,6 +73,33 @@ class OrderStatusType(NameStrEnum):
     INSTANT_ORDER_COMPLETED = auto()
 
 
+class OrderType(NameStrEnum):
+    LIMIT_POST_ONLY = auto()
+    MARKET = auto()
+    LIMIT = auto()
+    SIMPLE = auto()
+    STOP_LOSS_LIMIT = auto()
+    TAKE_PROFIT_LIMIT = auto()
+
+
+class StopLimitType(NameStrEnum):
+    TAKE_PROFIT_LIMIT = auto()
+    STOP_LOSS_LIMIT = auto()
+
+
+class TimeInForce(NameStrEnum):
+    GTC = auto()
+    FOK = auto()
+    IOC = auto()
+
+
+class BatchOrderType(NameStrEnum):
+    PLACE_MARKET = auto()
+    PLACE_LIMIT = auto()
+    PLACE_STOP = auto()
+    CANCEL_ORDER = auto()
+
+
 class TransactionType(NameStrEnum):
     LIMIT_BUY = auto()
     LIMIT_SELL = auto()
@@ -76,6 +107,7 @@ class TransactionType(NameStrEnum):
     MARKET_SELL = auto()
     SIMPLE_BUY = auto()
     SIMPLE_SELL = auto()
+    AUTO_BUY = auto()
     MAKER_REWARD = auto()
     BLOCKCHAIN_RECEIVE = auto()
     BLOCKCHAIN_SEND = auto()
@@ -86,9 +118,16 @@ class TransactionType(NameStrEnum):
     PROMOTIONAL_REBATE = auto()
     INTERNAL_TRANSFER = auto()
     FIAT_WITHDRAWAL_REVERSAL = auto()
+    PAYMENT_SENT = auto()
+    PAYMENT_RECEIVED = auto()
+    PAYMENT_REVERSED = auto()
+    PAYMENT_REWARD = auto()
+    OFF_CHAIN_BLOCKCHAIN_WITHDRAW = auto()
+    OFF_CHAIN_BLOCKCHAIN_DEPOSIT = auto()
 
 
 class CurrencyPair(NameStrEnum):
     BTCZAR = auto()
     ETHZAR = auto()
     XRPZAR = auto()
+    SOLZAR = auto()
